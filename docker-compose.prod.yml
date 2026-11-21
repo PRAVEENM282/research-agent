@@ -1,0 +1,79 @@
+services:
+  api:
+    ports: !reset []
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 600M
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+    volumes: !override ["handoff_logs:/app/logs"]
+  worker:
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 650M
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+    volumes: !override ["handoff_logs:/app/logs"]
+  temporal:
+    profiles: ["local-development-only"]
+  temporal-worker:
+    profiles: ["temporal"]
+    depends_on: !reset []
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 500M
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+    volumes: !override ["handoff_logs:/app/logs"]
+  db:
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 700M
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+  redis:
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 300M
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+  web:
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+volumes:
+  handoff_logs:

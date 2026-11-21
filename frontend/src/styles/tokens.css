@@ -1,0 +1,32 @@
+@font-face { font-family: "Fira Sans"; src: url("/fonts/FiraSans-Regular.otf") format("opentype"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Fira Sans"; src: url("/fonts/FiraSans-Medium.otf") format("opentype"); font-weight: 500; font-display: swap; }
+@font-face { font-family: "Fira Sans"; src: url("/fonts/FiraSans-SemiBold.otf") format("opentype"); font-weight: 600; font-display: swap; }
+@font-face { font-family: "Fira Sans"; src: url("/fonts/FiraSans-Bold.otf") format("opentype"); font-weight: 700; font-display: swap; }
+@font-face { font-family: "Fira Mono"; src: url("/fonts/FiraMono-Regular.otf") format("opentype"); font-weight: 400; font-display: swap; }
+
+:root {
+  color-scheme: light;
+  --mineral: #f4f5f1;
+  --surface: #ffffff;
+  --surface-muted: #f8f9f6;
+  --ink: #192c2b;
+  --muted: #637372;
+  --quiet: #8b9997;
+  --line: #e2e8e4;
+  --line-strong: #cbd5d0;
+  --agent: #325b57;
+  --agent-soft: #e7f0ec;
+  --human: #9a6300;
+  --human-soft: #fff2d8;
+  --success: #257451;
+  --success-soft: #e4f3eb;
+  --failure: #ad4037;
+  --failure-soft: #fae8e4;
+  --sidebar: #183330;
+  --sidebar-ink: #eef4f0;
+  --radius-sm: 8px;
+  --radius-md: 13px;
+  --radius-lg: 18px;
+  --shadow-soft: 0 12px 36px rgb(25 44 43 / 6%);
+  --shadow-dialog: 0 24px 80px rgb(16 40 44 / 22%);
+}

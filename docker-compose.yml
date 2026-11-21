@@ -1,0 +1,219 @@
+name: handoff
+
+services:
+  db:
+    image: postgres:15.12-alpine
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: agent_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d agent_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
+    logging: &default-logging
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+  redis:
+    image: redis:7.4.2-alpine
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1000"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 3s
+    restart: unless-stopped
+    logging: *default-logging
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["sh", "-c", "uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers $${API_WORKERS:-1} --proxy-headers --forwarded-allow-ips '*' --no-access-log" ]
+    environment: &app-env
+      APP_VERSION: ${APP_VERSION:-0.1.0}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://user:password@db:5432/agent_db}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/1}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/2}
+      LLM_API_KEY: ${LLM_API_KEY:-sk-your-provider-key}
+      XAI_API_KEY: ${XAI_API_KEY:-}
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-http://localhost/api/v1/auth/callback}
+      OIDC_ALLOWED_EMAILS: ${OIDC_ALLOWED_EMAILS:-}
+      OIDC_ALLOW_ANY_EMAILS: ${OIDC_ALLOW_ANY_EMAILS:-false}
+      OIDC_BOOTSTRAP_EMAIL: ${OIDC_BOOTSTRAP_EMAIL:-}
+      OIDC_SESSION_SECRET: ${OIDC_SESSION_SECRET:-}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-}
+      SEARXNG_URL: ${SEARXNG_URL:-http://searxng:8080}
+      CRAWL4AI_URL: ${CRAWL4AI_URL:-}
+      RESEARCH_MAX_QUERIES: ${RESEARCH_MAX_QUERIES:-3}
+      RESEARCH_MAX_RESULTS: ${RESEARCH_MAX_RESULTS:-8}
+      RESEARCH_MAX_PAGES: ${RESEARCH_MAX_PAGES:-5}
+      RESEARCH_MAX_BYTES: ${RESEARCH_MAX_BYTES:-1000000}
+      RESEARCH_TIMEOUT_SECONDS: ${RESEARCH_TIMEOUT_SECONDS:-12}
+      RESEARCH_MAX_TOOL_CALLS: ${RESEARCH_MAX_TOOL_CALLS:-12}
+      WORKFLOW_ENGINE: ${WORKFLOW_ENGINE:-temporal}
+      TEMPORAL_ADDRESS: ${TEMPORAL_ADDRESS:-temporal:7233}
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
+      TEMPORAL_API_KEY: ${TEMPORAL_API_KEY:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-false}
+      RATE_LIMIT_WINDOW_SECONDS: ${RATE_LIMIT_WINDOW_SECONDS:-60}
+      RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS:-30}
+      CELERY_PROBE_TIMEOUT_SECONDS: ${CELERY_PROBE_TIMEOUT_SECONDS:-1.5}
+      MAX_REQUEST_BYTES: ${MAX_REQUEST_BYTES:-65536}
+      LOG_DIR: /app/logs
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      searxng:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+    logging: *default-logging
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["celery", "-A", "src.worker.celery_app:celery_app", "worker", "-B", "--loglevel=INFO", "--concurrency=2", "--hostname=handoff@%h"]
+    environment: *app-env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      searxng:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A src.worker.celery_app:celery_app inspect ping --timeout=3 | grep -q pong"]
+      interval: 15s
+      timeout: 6s
+      retries: 6
+      start_period: 20s
+    restart: unless-stopped
+    logging: *default-logging
+
+  temporal:
+    image: temporalio/temporal:1.10.1
+    user: "0:0"
+    command: ["server", "start-dev", "--ip", "0.0.0.0", "--db-filename", "/var/lib/temporal/temporal.db"]
+    volumes:
+      - temporal_data:/var/lib/temporal
+    healthcheck:
+      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "127.0.0.1:7233"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    restart: unless-stopped
+    logging: *default-logging
+
+  temporal-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "src.worker.temporal_worker"]
+    environment: *app-env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      searxng:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+    restart: unless-stopped
+    logging: *default-logging
+
+  searxng:
+    image: searxng/searxng:2026.11.20-cd6d28091
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:-replace-with-a-random-secret}
+    volumes:
+      - ./deploy/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:8080/search?q=handoff&format=json',timeout=4)); assert 'results' in data"]
+      interval: 20s
+      timeout: 8s
+      retries: 8
+      start_period: 30s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.4"
+          memory: 350M
+    logging: *default-logging
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:2019/config/ >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 15s
+    restart: unless-stopped
+    logging: *default-logging
+
+volumes:
+  postgres_data:
+  redis_data:
+  temporal_data:
+  caddy_data:
+  caddy_config:
